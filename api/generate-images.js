@@ -1,66 +1,67 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+// Image generation using Pollinations.ai (free, no API key needed)
+// Uses Flux model for high quality AI image generation
 
 export default async function handler(req, res) {
-    // CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
-
     try {
         const { prompt, count = 6, style = 'vibrant', aspectRatio = '9:16' } = req.body;
         if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
+        const width = aspectRatio === '16:9' ? 1280 : 720;
+        const height = aspectRatio === '16:9' ? 720 : 1280;
+
         const styleGuides = {
-            vibrant: 'ultra vibrant colors, high contrast, visually stunning, eye-catching, professional quality',
-            cinematic: 'cinematic lighting, dramatic atmosphere, film-quality, 4K resolution, movie poster style',
-            artistic: 'digital art, beautiful illustration, trending on artstation, masterpiece quality',
+            vibrant: 'ultra vibrant colors, high contrast, visually stunning, eye-catching',
+            cinematic: 'cinematic lighting, dramatic atmosphere, film quality, 4K',
+            artistic: 'digital art, beautiful illustration, trending on artstation, masterpiece',
             realistic: 'photorealistic, ultra HD, detailed, natural lighting, professional photography',
             anime: 'anime style, vibrant colors, detailed illustration, studio quality anime art',
-            devotional: 'divine atmosphere, golden light, spiritual, sacred art, traditional Indian art style',
-            folk: 'traditional folk art style, colorful, rural Indian aesthetics, earthy tones, cultural'
+            devotional: 'divine atmosphere, golden light, spiritual, sacred art, traditional Indian art',
+            folk: 'traditional folk art style, colorful, rural Indian aesthetics, earthy tones'
         };
         const styleGuide = styleGuides[style] || styleGuides.vibrant;
 
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({
-            model: 'gemini-2.5-flash',
-            generationConfig: { responseModalities: ['Text', 'Image'] }
-        });
-
+        // Generate images using Pollinations.ai — free Flux model, no API key needed
+        const batchSize = 3;
         const images = [];
 
-        for (let i = 0; i < count; i++) {
-            try {
-                const scenePrompt = `Generate scene ${i + 1} of ${count} for a video: ${prompt}. ${styleGuide}. 
-          Make each scene visually distinct but thematically connected. 
-          Aspect ratio: ${aspectRatio}. High quality, suitable for YouTube video.`;
+        for (let b = 0; b < count; b += batchSize) {
+            const batchCount = Math.min(batchSize, count - b);
+            const batch = Array.from({ length: batchCount }, async (_, idx) => {
+                const i = b + idx;
+                const scenePrompt = `${prompt}, scene ${i + 1} of ${count}, ${styleGuide}, high quality, detailed`;
+                const seed = Math.floor(Math.random() * 999999) + i;
+                const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(scenePrompt)}?width=${width}&height=${height}&seed=${seed}&model=flux&nologo=true`;
 
-                const result = await model.generateContent(scenePrompt);
-                const response = result.response;
-
-                if (response.candidates?.[0]?.content?.parts) {
-                    for (const part of response.candidates[0].content.parts) {
-                        if (part.inlineData) {
-                            images.push({
-                                id: `img-${Date.now()}-${i}`,
-                                data: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
-                                prompt: scenePrompt,
-                                source: 'gemini'
-                            });
-                        }
-                    }
+                try {
+                    const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const buffer = Buffer.from(await response.arrayBuffer());
+                    const base64 = buffer.toString('base64');
+                    const mimeType = response.headers.get('content-type') || 'image/jpeg';
+                    return {
+                        id: `img-${Date.now()}-${i}`,
+                        data: `data:${mimeType};base64,${base64}`,
+                        prompt: scenePrompt,
+                        source: 'pollinations'
+                    };
+                } catch (err) {
+                    console.warn(`Image ${i + 1} failed:`, err.message);
+                    return null;
                 }
+            });
 
-                // Rate limit delay
-                if (i < count - 1) await new Promise(r => setTimeout(r, 500));
-            } catch (err) {
-                console.warn(`Image ${i + 1} failed:`, err.message);
-            }
+            const results = await Promise.all(batch);
+            images.push(...results.filter(Boolean));
+        }
+
+        if (images.length === 0) {
+            return res.status(500).json({ error: 'All image generation attempts failed. Please try again.' });
         }
 
         res.json({ success: true, images });

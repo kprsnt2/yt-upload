@@ -15,7 +15,7 @@ export default async function handler(req, res) {
         if (!topic) return res.status(400).json({ error: 'Topic is required' });
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
         const prompt = `You are a YouTube SEO expert specializing in Telugu/Indian content.
 Generate optimized YouTube metadata for a ${format === 'short' ? 'YouTube Short' : 'regular YouTube video'}.

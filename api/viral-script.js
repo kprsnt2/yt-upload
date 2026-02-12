@@ -15,7 +15,7 @@ export default async function handler(req, res) {
         if (!idea) return res.status(400).json({ error: 'Idea is required' });
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
         const totalDuration = format === 'short' ? 60 : 180;
         const secondsPerImage = Math.floor(totalDuration / imageCount);

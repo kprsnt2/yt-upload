@@ -1,31 +1,19 @@
-import { useState, useEffect } from 'react';
-import { Film, Download, Trash2, RefreshCw, Calendar, HardDrive } from 'lucide-react';
-import axios from 'axios';
-import { API, getMediaUrl } from '../config.js';
+import { useState } from 'react';
+import { Download, RefreshCw, Trash2, Film } from 'lucide-react';
 
 export default function MyVideosPage() {
-    const [videos, setVideos] = useState([]);
-    const [loading, setLoading] = useState(true);
-
-    const fetchVideos = async () => {
-        setLoading(true);
+    // In serverless mode, videos are compiled in-browser and stored in memory/localStorage
+    // This page shows videos from the current session
+    const [videos, setVideos] = useState(() => {
         try {
-            const res = await axios.get(`${API}/videos`);
-            setVideos(res.data.videos || []);
-        } catch (err) {
-            console.error('Failed to fetch videos:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
+            const saved = localStorage.getItem('sujatha_videos');
+            return saved ? JSON.parse(saved) : [];
+        } catch { return []; }
+    });
 
-    useEffect(() => {
-        fetchVideos();
-    }, []);
-
-    const formatSize = (bytes) => {
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    const clearHistory = () => {
+        localStorage.removeItem('sujatha_videos');
+        setVideos([]);
     };
 
     const formatDate = (dateStr) => {
@@ -42,83 +30,56 @@ export default function MyVideosPage() {
                 <div>
                     <h2>My Videos</h2>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        {videos.length} video{videos.length !== 1 ? 's' : ''} created
+                        Videos are compiled in your browser — download to keep!
                     </p>
                 </div>
-                <button className="btn btn-ghost btn-sm" onClick={fetchVideos}>
-                    <RefreshCw size={14} /> Refresh
-                </button>
+                {videos.length > 0 && (
+                    <button className="btn btn-ghost btn-sm" onClick={clearHistory}>
+                        <Trash2 size={14} /> Clear
+                    </button>
+                )}
             </div>
 
-            {loading && (
-                <div className="loading-container">
-                    <div className="loading-spinner" />
-                    <p className="loading-text">Loading videos...</p>
-                </div>
-            )}
-
-            {!loading && videos.length === 0 && (
+            {videos.length === 0 && (
                 <div className="empty-state">
                     <div className="empty-state-icon">🎬</div>
                     <h3>No Videos Yet</h3>
-                    <p style={{ color: 'var(--text-secondary)' }}>
-                        Create your first video to see it here
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                        Create a video from the wizard or Viral Studio — it'll compile right in your browser!
                     </p>
+                    <div className="card" style={{ textAlign: 'left', padding: '16px' }}>
+                        <h4 style={{ marginBottom: '12px' }}>💡 How it works:</h4>
+                        <ol style={{ fontSize: '0.85rem', lineHeight: '2', color: 'var(--text-secondary)', paddingLeft: '20px' }}>
+                            <li>AI generates images from your text prompt</li>
+                            <li>Upload a music track (Telugu folk, devotional, etc.)</li>
+                            <li>Video compiles <strong>in your browser</strong> — no server needed!</li>
+                            <li>Download the .webm video</li>
+                            <li>Upload to YouTube as Short or Video</li>
+                        </ol>
+                    </div>
                 </div>
             )}
 
-            {!loading && videos.length > 0 && (
+            {videos.length > 0 && (
                 <div className="stagger" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {videos.map((video, i) => (
                         <div key={i} className="card" style={{ padding: '16px' }}>
                             <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
-                                {/* Video thumbnail/preview */}
                                 <div style={{
-                                    width: '80px',
-                                    height: '60px',
-                                    borderRadius: '8px',
-                                    background: 'var(--bg-secondary)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    flexShrink: 0,
-                                    overflow: 'hidden'
+                                    width: '60px', height: '60px', borderRadius: '8px',
+                                    background: 'var(--bg-secondary)', display: 'flex',
+                                    alignItems: 'center', justifyContent: 'center'
                                 }}>
-                                    <video
-                                        src={getMediaUrl(video.url)}
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                        muted
-                                        preload="metadata"
-                                    />
+                                    <Film size={24} color="var(--accent)" />
                                 </div>
-
-                                {/* Video info */}
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{
-                                        fontWeight: 600, fontSize: '0.9rem',
-                                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
-                                    }}>
-                                        {video.name.replace('.mp4', '').replace(/_/g, ' ')}
+                                    <div style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {video.title || `Video ${i + 1}`}
                                     </div>
-                                    <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                            <HardDrive size={12} /> {formatSize(video.size)}
-                                        </span>
-                                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                            <Calendar size={12} /> {formatDate(video.created)}
-                                        </span>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                        {video.format === 'short' ? '📱 Short' : '🖥️ Long'} • {video.scenes} scenes • {formatDate(video.created)}
                                     </div>
                                 </div>
-
-                                {/* Download button */}
-                                <a
-                                    href={`${API}/download/${video.name}`}
-                                    download
-                                    className="btn btn-primary btn-icon"
-                                    title="Download"
-                                >
-                                    <Download size={16} />
-                                </a>
                             </div>
                         </div>
                     ))}

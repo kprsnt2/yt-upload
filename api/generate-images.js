@@ -1,5 +1,5 @@
-// Image generation using Pollinations.ai (free, no API key needed)
-// Uses Flux model for high quality AI image generation
+// Image generation using NVIDIA NIM API (Stable Diffusion XL)
+// Requires NVIDIA_API_KEY environment variable
 
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -8,60 +8,91 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+    const apiKey = process.env.NVIDIA_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'NVIDIA_API_KEY not configured. Add it in Vercel Environment Variables.' });
+
     try {
         const { prompt, count = 6, style = 'vibrant', aspectRatio = '9:16' } = req.body;
         if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
-        const width = aspectRatio === '16:9' ? 1280 : 720;
-        const height = aspectRatio === '16:9' ? 720 : 1280;
-
         const styleGuides = {
-            vibrant: 'ultra vibrant colors, high contrast, visually stunning, eye-catching',
-            cinematic: 'cinematic lighting, dramatic atmosphere, film quality, 4K',
-            artistic: 'digital art, beautiful illustration, trending on artstation, masterpiece',
+            vibrant: 'ultra vibrant colors, high contrast, visually stunning, eye-catching, professional quality',
+            cinematic: 'cinematic lighting, dramatic atmosphere, film quality, 4K resolution, movie poster style',
+            artistic: 'digital art, beautiful illustration, trending on artstation, masterpiece quality',
             realistic: 'photorealistic, ultra HD, detailed, natural lighting, professional photography',
             anime: 'anime style, vibrant colors, detailed illustration, studio quality anime art',
-            devotional: 'divine atmosphere, golden light, spiritual, sacred art, traditional Indian art',
-            folk: 'traditional folk art style, colorful, rural Indian aesthetics, earthy tones'
+            devotional: 'divine atmosphere, golden light, spiritual, sacred art, traditional Indian art style',
+            folk: 'traditional folk art style, colorful, rural Indian aesthetics, earthy tones, cultural'
         };
         const styleGuide = styleGuides[style] || styleGuides.vibrant;
 
-        // Generate images using Pollinations.ai — free Flux model, no API key needed
-        const batchSize = 3;
         const images = [];
 
-        for (let b = 0; b < count; b += batchSize) {
-            const batchCount = Math.min(batchSize, count - b);
-            const batch = Array.from({ length: batchCount }, async (_, idx) => {
-                const i = b + idx;
-                const scenePrompt = `${prompt}, scene ${i + 1} of ${count}, ${styleGuide}, high quality, detailed`;
-                const seed = Math.floor(Math.random() * 999999) + i;
-                const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(scenePrompt)}?width=${width}&height=${height}&seed=${seed}&model=flux&nologo=true`;
+        // Generate images sequentially to avoid rate limits
+        for (let i = 0; i < count; i++) {
+            const scenePrompt = `${prompt}, scene ${i + 1} of ${count}, ${styleGuide}, high quality, detailed, 8k`;
+            const seed = Math.floor(Math.random() * 4294967295);
 
-                try {
-                    const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    const buffer = Buffer.from(await response.arrayBuffer());
-                    const base64 = buffer.toString('base64');
-                    const mimeType = response.headers.get('content-type') || 'image/jpeg';
-                    return {
-                        id: `img-${Date.now()}-${i}`,
-                        data: `data:${mimeType};base64,${base64}`,
-                        prompt: scenePrompt,
-                        source: 'pollinations'
-                    };
-                } catch (err) {
-                    console.warn(`Image ${i + 1} failed:`, err.message);
-                    return null;
+            try {
+                const response = await fetch('https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        text_prompts: [
+                            { text: scenePrompt, weight: 1 },
+                            { text: 'blurry, low quality, distorted, watermark, text, ugly, deformed', weight: -1 }
+                        ],
+                        cfg_scale: 7,
+                        sampler: 'K_DPM_2_ANCESTRAL',
+                        seed: seed,
+                        steps: 25,
+                        width: aspectRatio === '16:9' ? 1344 : 768,
+                        height: aspectRatio === '16:9' ? 768 : 1344,
+                    }),
+                    signal: AbortSignal.timeout(30000),
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.warn(`NVIDIA API error for image ${i + 1}:`, response.status, errorText);
+
+                    // If rate limited, wait and retry once
+                    if (response.status === 429) {
+                        await new Promise(r => setTimeout(r, 2000));
+                        continue;
+                    }
+                    continue;
                 }
-            });
 
-            const results = await Promise.all(batch);
-            images.push(...results.filter(Boolean));
+                const data = await response.json();
+
+                if (data.artifacts && data.artifacts.length > 0) {
+                    const artifact = data.artifacts[0];
+                    images.push({
+                        id: `img-${Date.now()}-${i}`,
+                        data: `data:image/png;base64,${artifact.base64}`,
+                        prompt: scenePrompt,
+                        source: 'nvidia-sdxl',
+                        seed: artifact.seed || seed,
+                    });
+                }
+
+                // Small delay between requests to avoid rate limits
+                if (i < count - 1) await new Promise(r => setTimeout(r, 300));
+
+            } catch (err) {
+                console.warn(`Image ${i + 1} generation failed:`, err.message);
+            }
         }
 
         if (images.length === 0) {
-            return res.status(500).json({ error: 'All image generation attempts failed. Please try again.' });
+            return res.status(500).json({
+                error: 'No images could be generated. Please check your NVIDIA API key and credits at build.nvidia.com'
+            });
         }
 
         res.json({ success: true, images });

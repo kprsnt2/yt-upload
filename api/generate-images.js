@@ -26,72 +26,139 @@ export default async function handler(req, res) {
         };
         const styleGuide = styleGuides[style] || styleGuides.vibrant;
 
+        // NVIDIA SDXL endpoint enforces width >= 1024 and height <= 1024.
+        // For portrait requests we use 1024x1024 as the closest supported fallback.
+        const dimensions = aspectRatio === '16:9'
+            ? { width: 1344, height: 768 }
+            : { width: 1024, height: 1024 };
+
         const images = [];
+        const generationErrors = [];
+
+        const parseNvidiaError = (status, rawBody) => {
+            const bodyText = (rawBody || '').trim();
+            let parsed;
+
+            try {
+                parsed = JSON.parse(bodyText);
+            } catch {
+                parsed = null;
+            }
+
+            const providerMessage = parsed?.detail || parsed?.error || parsed?.message || bodyText;
+
+            if (status === 401 || status === 403) {
+                return `NVIDIA rejected the API key (${status}). Check NVIDIA_API_KEY permissions.`;
+            }
+            if (status === 402) {
+                return 'NVIDIA credits are exhausted (402 Payment Required). Add credits in build.nvidia.com.';
+            }
+            if (status === 422) {
+                return `NVIDIA rejected the request as invalid (422). ${providerMessage || 'Please simplify the prompt or adjust generation parameters.'}`;
+            }
+            if (status === 429) {
+                return 'NVIDIA rate limit reached (429). Please retry in a few seconds.';
+            }
+            if (status >= 500) {
+                return `NVIDIA service error (${status}). ${providerMessage || 'Temporary provider issue.'}`;
+            }
+
+            return `NVIDIA request failed (${status}). ${providerMessage || 'Unknown provider error.'}`;
+        };
 
         // Generate images sequentially to avoid rate limits
         for (let i = 0; i < count; i++) {
             const scenePrompt = `${prompt}, scene ${i + 1} of ${count}, ${styleGuide}, high quality, detailed, 8k`;
             const seed = Math.floor(Math.random() * 4294967295);
 
-            try {
-                const response = await fetch('https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${apiKey}`,
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        text_prompts: [
-                            { text: scenePrompt, weight: 1 },
-                            { text: 'blurry, low quality, distorted, watermark, text, ugly, deformed', weight: -1 }
-                        ],
-                        cfg_scale: 7,
-                        sampler: 'K_DPM_2_ANCESTRAL',
-                        seed: seed,
-                        steps: 25,
-                        width: aspectRatio === '16:9' ? 1344 : 768,
-                        height: aspectRatio === '16:9' ? 768 : 1344,
-                    }),
-                    signal: AbortSignal.timeout(30000),
-                });
+            let imageGenerated = false;
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.warn(`NVIDIA API error for image ${i + 1}:`, response.status, errorText);
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    const response = await fetch('https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            text_prompts: [
+                                { text: scenePrompt, weight: 1 },
+                                { text: 'blurry, low quality, distorted, watermark, text, ugly, deformed', weight: -1 }
+                            ],
+                            cfg_scale: 7,
+                            sampler: 'K_DPM_2_ANCESTRAL',
+                            seed: seed,
+                            steps: 25,
+                            width: dimensions.width,
+                            height: dimensions.height,
+                        }),
+                        signal: AbortSignal.timeout(30000),
+                    });
 
-                    // If rate limited, wait and retry once
-                    if (response.status === 429) {
-                        await new Promise(r => setTimeout(r, 2000));
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        const message = parseNvidiaError(response.status, errorText);
+                        console.warn(`NVIDIA API error for image ${i + 1} (attempt ${attempt}):`, response.status, errorText);
+
+                        if (response.status === 429 && attempt < 2) {
+                            await new Promise(r => setTimeout(r, 2000));
+                            continue;
+                        }
+
+                        generationErrors.push({ image: i + 1, attempt, status: response.status, message });
+                        break;
+                    }
+
+                    const data = await response.json();
+
+                    if (data.artifacts && data.artifacts.length > 0) {
+                        const artifact = data.artifacts[0];
+                        images.push({
+                            id: `img-${Date.now()}-${i}`,
+                            data: `data:image/png;base64,${artifact.base64}`,
+                            prompt: scenePrompt,
+                            source: 'nvidia-sdxl',
+                            seed: artifact.seed || seed,
+                        });
+                        imageGenerated = true;
+                        break;
+                    }
+
+                    generationErrors.push({
+                        image: i + 1,
+                        attempt,
+                        message: 'NVIDIA returned success but no image artifacts.'
+                    });
+                    break;
+
+                } catch (err) {
+                    const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+                    const message = isTimeout
+                        ? 'Request to NVIDIA timed out after 30s. Try a shorter prompt or retry.'
+                        : `Network/Runtime error calling NVIDIA: ${err.message}`;
+
+                    console.warn(`Image ${i + 1} generation failed on attempt ${attempt}:`, err.message);
+                    generationErrors.push({ image: i + 1, attempt, message });
+
+                    if (attempt < 2) {
+                        await new Promise(r => setTimeout(r, 1200));
                         continue;
                     }
-                    continue;
                 }
+            }
 
-                const data = await response.json();
-
-                if (data.artifacts && data.artifacts.length > 0) {
-                    const artifact = data.artifacts[0];
-                    images.push({
-                        id: `img-${Date.now()}-${i}`,
-                        data: `data:image/png;base64,${artifact.base64}`,
-                        prompt: scenePrompt,
-                        source: 'nvidia-sdxl',
-                        seed: artifact.seed || seed,
-                    });
-                }
-
-                // Small delay between requests to avoid rate limits
-                if (i < count - 1) await new Promise(r => setTimeout(r, 300));
-
-            } catch (err) {
-                console.warn(`Image ${i + 1} generation failed:`, err.message);
+            // Small delay between requests to avoid rate limits
+            if (!imageGenerated && i < count - 1) {
+                await new Promise(r => setTimeout(r, 300));
             }
         }
 
         if (images.length === 0) {
             return res.status(500).json({
-                error: 'No images could be generated. Please check your NVIDIA API key and credits at build.nvidia.com'
+                error: generationErrors[0]?.message || 'No images could be generated from NVIDIA API.',
+                details: generationErrors
             });
         }
 

@@ -47,6 +47,9 @@ export default async function handler(req, res) {
             if (status === 402) {
                 return 'NVIDIA credits are exhausted (402 Payment Required). Add credits in build.nvidia.com.';
             }
+            if (status === 422) {
+                return `NVIDIA rejected the request as invalid (422). ${providerMessage || 'Please simplify the prompt or adjust generation parameters.'}`;
+            }
             if (status === 429) {
                 return 'NVIDIA rate limit reached (429). Please retry in a few seconds.';
             }

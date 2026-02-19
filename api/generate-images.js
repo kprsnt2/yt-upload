@@ -26,6 +26,12 @@ export default async function handler(req, res) {
         };
         const styleGuide = styleGuides[style] || styleGuides.vibrant;
 
+        // NVIDIA SDXL endpoint enforces width >= 1024 and height <= 1024.
+        // For portrait requests we use 1024x1024 as the closest supported fallback.
+        const dimensions = aspectRatio === '16:9'
+            ? { width: 1344, height: 768 }
+            : { width: 1024, height: 1024 };
+
         const images = [];
         const generationErrors = [];
 
@@ -85,8 +91,8 @@ export default async function handler(req, res) {
                             sampler: 'K_DPM_2_ANCESTRAL',
                             seed: seed,
                             steps: 25,
-                            width: aspectRatio === '16:9' ? 1344 : 768,
-                            height: aspectRatio === '16:9' ? 768 : 1344,
+                            width: dimensions.width,
+                            height: dimensions.height,
                         }),
                         signal: AbortSignal.timeout(30000),
                     });

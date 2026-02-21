@@ -43,7 +43,7 @@ export default async function handler(req, res) {
         const enhancedPrompt = `${prompt}. High quality cinematic motion, stable camera movement, clean details, no text, no watermark.`;
         const negativePrompt = 'blurry, low quality, artifacts, watermark, text, logo, flicker, distortion';
 
-        const response = await fetch(`https://api-inference.huggingface.co/models/${selectedModel.providerModel}`, {
+        const response = await fetch(`https://router.huggingface.co/hf-inference/models/${selectedModel.providerModel}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -67,8 +67,12 @@ export default async function handler(req, res) {
 
         if (!response.ok) {
             const errorText = await response.text();
+            const missingKeyHint = (!apiKey && (response.status === 401 || response.status === 403))
+                ? ' Set HUGGINGFACE_API_KEY in your environment.'
+                : '';
+
             return res.status(response.status).json({
-                error: `Video provider error (${response.status}). ${errorText || 'Unknown error.'}`,
+                error: `Video provider error (${response.status}). ${errorText || 'Unknown error.'}${missingKeyHint}`,
                 model: {
                     id: selectedModel.id,
                     name: selectedModel.name,

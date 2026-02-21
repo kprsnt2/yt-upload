@@ -26,12 +26,20 @@ const STYLES = [
     { id: 'anime', name: 'Anime', icon: '✨' },
 ];
 
+
+const VIDEO_MODELS = [
+    { id: 'cheap', name: 'Cheap', note: 'Fastest & lowest cost', providerModel: 'cerspense/zeroscope_v2_576w' },
+    { id: 'balanced', name: 'Balanced', note: 'Best value (recommended)', providerModel: 'THUDM/CogVideoX-2b' },
+    { id: 'best', name: 'Best', note: 'Highest visual quality', providerModel: 'genmo/mochi-1-preview' },
+];
+
 export default function CreateVideoPage() {
     const [step, setStep] = useState(1);
     const [prompt, setPrompt] = useState('');
     const [style, setStyle] = useState('vibrant');
     const [format, setFormat] = useState('short');
     const [imageCount, setImageCount] = useState(6);
+    const [imageModel, setImageModel] = useState('balanced');
     const [images, setImages] = useState([]);
     const [selectedImages, setSelectedImages] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -53,7 +61,7 @@ export default function CreateVideoPage() {
         setError('');
         try {
             const res = await axios.post(`${API}/generate-images`, {
-                prompt, count: imageCount, style,
+                prompt, count: imageCount, style, model: imageModel,
                 aspectRatio: format === 'short' ? '9:16' : '16:9'
             });
             setImages(res.data.images);
@@ -81,6 +89,63 @@ export default function CreateVideoPage() {
         setSelectedMusic({ id: 'custom', title: file.name, url, isCustom: true });
     };
 
+    const generateMetadataForPrompt = async () => {
+        setLoadingText('Generating title & tags in EN + Telugu... 📝');
+        try {
+            const metaRes = await axios.post(`${API}/generate-metadata`, {
+                topic: prompt, format
+            });
+            setMetadata(metaRes.data.metadata);
+        } catch {
+            setMetadata({
+                title_en: `${prompt.substring(0, 60)} ✨ #shorts`,
+                title_te: prompt.substring(0, 60),
+                description_en: `${prompt}
+
+🙏 Subscribe to Sujatha Nanamma Vlogs!
+#telugu #viral`,
+                description_te: `${prompt}
+
+🙏 సుజాతా నానమ్మ వ్లాగ్స్`,
+                tags: ['telugu', 'viral', 'trending', 'shorts'],
+                category: 'Entertainment',
+            });
+        }
+    };
+
+    const handleGenerateVideoDirectly = async () => {
+        if (!prompt.trim()) return;
+        setLoading(true);
+        setProgress(0);
+        setError('');
+
+        try {
+            setLoadingText('Generating AI video from your prompt... 🎥');
+            const res = await axios.post(`${API}/generate-video`, {
+                prompt,
+                model: imageModel,
+                format,
+            });
+
+            if (!res.data?.video) {
+                throw new Error('Video API did not return a playable video.');
+            }
+
+            setLoadingText('Preparing video preview...');
+            const videoResponse = await fetch(res.data.video);
+            const blob = await videoResponse.blob();
+
+            setVideoBlob(blob);
+            setVideoUrl(createVideoUrl(blob));
+            await generateMetadataForPrompt();
+            setStep(5);
+        } catch (err) {
+            setError(err.response?.data?.error || err.message || 'Failed to generate video from prompt');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // Compile video in the BROWSER (no server needed)
     const handleCompileVideo = async () => {
         setLoading(true);
@@ -106,25 +171,7 @@ export default function CreateVideoPage() {
             setVideoBlob(blob);
             setVideoUrl(createVideoUrl(blob));
 
-            // Generate metadata
-            setLoadingText('Generating title & tags in EN + Telugu... 📝');
-            try {
-                const metaRes = await axios.post(`${API}/generate-metadata`, {
-                    topic: prompt, format
-                });
-                setMetadata(metaRes.data.metadata);
-            } catch {
-                // Metadata gen failed, use defaults
-                setMetadata({
-                    title_en: `${prompt.substring(0, 60)} ✨ #shorts`,
-                    title_te: prompt.substring(0, 60),
-                    description_en: `${prompt}\n\n🙏 Subscribe to Sujatha Nanamma Vlogs!\n#telugu #viral`,
-                    description_te: `${prompt}\n\n🙏 సుజాతా నానమ్మ వ్లాగ్స్`,
-                    tags: ['telugu', 'viral', 'trending', 'shorts'],
-                    category: 'Entertainment',
-                });
-            }
-
+            await generateMetadataForPrompt();
             setStep(5);
         } catch (err) {
             setError(err.message || 'Failed to compile video');
@@ -233,6 +280,35 @@ export default function CreateVideoPage() {
                                     ))}
                                 </div>
                             </div>
+                            <div className="input-group" style={{ marginBottom: '20px' }}>
+                                <label>Quick Style</label>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    {STYLES.map(s => (
+                                        <button key={s.id} className={`btn btn-sm ${style === s.id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setStyle(s.id)}>
+                                            {s.icon} {s.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="input-group" style={{ marginBottom: '20px' }}>
+                                <label>Video Model (cost vs quality)</label>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    {VIDEO_MODELS.map(m => (
+                                        <button key={m.id} className={`btn btn-sm ${imageModel === m.id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setImageModel(m.id)}>
+                                            {m.name}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                                    Engine: Hugging Face text-to-video • {VIDEO_MODELS.find(m => m.id === imageModel)?.providerModel}
+                                </div>
+                            </div>
+                            <button className="btn btn-primary btn-full" onClick={handleGenerateVideoDirectly} disabled={!prompt.trim()}>
+                                <Play size={16} /> Generate Video Directly from Prompt
+                            </button>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                                No image generation step: prompt goes directly to video + metadata.
+                            </div>
                         </div>
                     )}
 
@@ -250,11 +326,26 @@ export default function CreateVideoPage() {
                                     ))}
                                 </div>
                             </div>
+                            <div className="input-group" style={{ marginBottom: '20px' }}>
+                                <label>Image Model for scene generation (optional path)</label>
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    {VIDEO_MODELS.map(m => (
+                                        <button key={m.id} className={`btn btn-sm ${imageModel === m.id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setImageModel(m.id)}>
+                                            {m.name}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                                    {VIDEO_MODELS.find(m => m.id === imageModel)?.note}
+                                </div>
+                            </div>
+
                             <div className="card" style={{ marginTop: '16px' }}>
                                 <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px' }}>Preview</div>
                                 <p style={{ fontSize: '0.85rem', lineHeight: '1.5' }}>
                                     "{prompt}" — <span style={{ color: 'var(--accent)' }}>{STYLES.find(s => s.id === style)?.name}</span>
                                     {' • '}{imageCount} scenes{' • '}{format === 'short' ? '9:16 Short' : '16:9 Long'}
+                                    {' • '}<span style={{ color: 'var(--accent-2)' }}>{VIDEO_MODELS.find(m => m.id === imageModel)?.name}</span>
                                 </p>
                             </div>
                         </div>

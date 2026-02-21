@@ -5,6 +5,12 @@ import axios from 'axios';
 import { API } from '../config.js';
 import { compileVideoInBrowser, downloadBlob, createVideoUrl } from '../lib/videoCompiler.js';
 
+const IMAGE_MODELS = [
+    { id: 'cheap', name: 'Cheap' },
+    { id: 'balanced', name: 'Balanced' },
+    { id: 'best', name: 'Best' },
+];
+
 export default function ViralStudioPage() {
     const navigate = useNavigate();
     const [niche, setNiche] = useState('telugu culture');
@@ -19,6 +25,7 @@ export default function ViralStudioPage() {
     const [autoImages, setAutoImages] = useState([]);
     const [videoBlob, setVideoBlob] = useState(null);
     const [videoUrl, setVideoUrl] = useState('');
+    const [imageModel, setImageModel] = useState('balanced');
 
     const handleGetIdeas = async () => {
         setLoading(true);
@@ -73,6 +80,7 @@ export default function ViralStudioPage() {
                     prompt: scene.imagePrompt || scene.narration,
                     count: 1,
                     style: 'cinematic',
+                    model: imageModel,
                     aspectRatio: selectedIdea?.format === 'Long' ? '16:9' : '9:16'
                 });
                 if (res.data.images?.length > 0) {
@@ -133,6 +141,16 @@ export default function ViralStudioPage() {
                     <div className="tag-list">
                         {['telugu culture', 'devotional', 'village life', 'festivals', 'cooking', 'travel', 'mythology', 'motivational', 'nature', 'funny'].map(tag => (
                             <span key={tag} className={`tag ${niche === tag ? 'selected' : ''}`} onClick={() => setNiche(tag)}>{tag}</span>
+                        ))}
+                    </div>
+                </div>
+                <div className="input-group" style={{ marginBottom: '12px' }}>
+                    <label>Image Model (cost vs quality)</label>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {IMAGE_MODELS.map(m => (
+                            <button key={m.id} type="button" className={`btn btn-sm ${imageModel === m.id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setImageModel(m.id)}>
+                                {m.name}
+                            </button>
                         ))}
                     </div>
                 </div>

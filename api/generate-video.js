@@ -37,8 +37,21 @@ export default async function handler(req, res) {
         if (!prompt?.trim()) return res.status(400).json({ error: 'Prompt is required' });
 
         const selectedModel = VIDEO_MODELS[model] || VIDEO_MODELS.balanced;
-        const apiKey = process.env.HUGGINGFACE_API_KEY;
+        const apiKey = process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || process.env.HUGGINGFACEHUB_API_TOKEN;
         const isPortrait = format === 'short';
+
+        if (!apiKey) {
+            return res.status(400).json({
+                error: 'Hugging Face token is required for direct video generation. Set HUGGINGFACE_API_KEY (or HF_TOKEN).',
+                model: {
+                    id: selectedModel.id,
+                    name: selectedModel.name,
+                    provider: selectedModel.provider,
+                    providerModel: selectedModel.providerModel,
+                    description: selectedModel.description,
+                },
+            });
+        }
 
         const enhancedPrompt = `${prompt}. High quality cinematic motion, stable camera movement, clean details, no text, no watermark.`;
         const negativePrompt = 'blurry, low quality, artifacts, watermark, text, logo, flicker, distortion';
@@ -66,13 +79,31 @@ export default async function handler(req, res) {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            const missingKeyHint = (!apiKey && (response.status === 401 || response.status === 403))
-                ? ' Set HUGGINGFACE_API_KEY in your environment.'
+            const contentType = response.headers.get('content-type') || '';
+            const rawBody = await response.text();
+
+            let providerMessage = 'Unknown error.';
+            if (contentType.includes('application/json')) {
+                try {
+                    const parsed = JSON.parse(rawBody);
+                    providerMessage = parsed?.error || parsed?.message || rawBody || providerMessage;
+                } catch {
+                    providerMessage = rawBody || providerMessage;
+                }
+            } else if (contentType.includes('text/html')) {
+                providerMessage = response.status === 401 || response.status === 403
+                    ? 'Unauthorized by Hugging Face. Verify token and permissions.'
+                    : 'Provider returned an HTML error page.';
+            } else {
+                providerMessage = rawBody || providerMessage;
+            }
+
+            const authHint = (response.status === 401 || response.status === 403)
+                ? ' Use HUGGINGFACE_API_KEY (or HF_TOKEN) with Inference permissions.'
                 : '';
 
             return res.status(response.status).json({
-                error: `Video provider error (${response.status}). ${errorText || 'Unknown error.'}${missingKeyHint}`,
+                error: `Video provider error (${response.status}). ${providerMessage}${authHint}`,
                 model: {
                     id: selectedModel.id,
                     name: selectedModel.name,

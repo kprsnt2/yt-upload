@@ -12,8 +12,37 @@ export default async function handler(req, res) {
     if (!apiKey) return res.status(500).json({ error: 'NVIDIA_API_KEY not configured. Add it in Vercel Environment Variables.' });
 
     try {
-        const { prompt, count = 6, style = 'vibrant', aspectRatio = '9:16' } = req.body;
+        const { prompt, count = 6, style = 'vibrant', aspectRatio = '9:16', model = 'balanced' } = req.body;
         if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+
+        const modelProfiles = {
+            cheap: {
+                id: 'cheap',
+                name: 'Cheap (Fast Draft)',
+                description: 'Lowest cost profile with faster generations and good draft quality.',
+                steps: 18,
+                cfgScale: 6,
+                sampler: 'K_EULER_ANCESTRAL',
+            },
+            balanced: {
+                id: 'balanced',
+                name: 'Balanced (Recommended)',
+                description: 'Good quality/cost balance for most YouTube scenes.',
+                steps: 25,
+                cfgScale: 7,
+                sampler: 'K_DPM_2_ANCESTRAL',
+            },
+            best: {
+                id: 'best',
+                name: 'Best (Quality)',
+                description: 'Highest visual quality profile for hero shots and thumbnails.',
+                steps: 32,
+                cfgScale: 8,
+                sampler: 'K_DPM_2_ANCESTRAL',
+            }
+        };
+
+        const selectedModel = modelProfiles[model] || modelProfiles.balanced;
 
         const styleGuides = {
             vibrant: 'ultra vibrant colors, high contrast, visually stunning, eye-catching, professional quality',
@@ -87,10 +116,10 @@ export default async function handler(req, res) {
                                 { text: scenePrompt, weight: 1 },
                                 { text: 'blurry, low quality, distorted, watermark, text, ugly, deformed', weight: -1 }
                             ],
-                            cfg_scale: 7,
-                            sampler: 'K_DPM_2_ANCESTRAL',
+                            cfg_scale: selectedModel.cfgScale,
+                            sampler: selectedModel.sampler,
                             seed: seed,
-                            steps: 25,
+                            steps: selectedModel.steps,
                             width: dimensions.width,
                             height: dimensions.height,
                         }),
@@ -120,6 +149,7 @@ export default async function handler(req, res) {
                             data: `data:image/png;base64,${artifact.base64}`,
                             prompt: scenePrompt,
                             source: 'nvidia-sdxl',
+                            model: selectedModel.id,
                             seed: artifact.seed || seed,
                         });
                         imageGenerated = true;
@@ -162,7 +192,16 @@ export default async function handler(req, res) {
             });
         }
 
-        res.json({ success: true, images });
+        res.json({
+            success: true,
+            model: {
+                id: selectedModel.id,
+                name: selectedModel.name,
+                description: selectedModel.description,
+                providerModel: 'stabilityai/stable-diffusion-xl',
+            },
+            images
+        });
     } catch (error) {
         console.error('Image generation error:', error);
         res.status(500).json({ error: error.message || 'Failed to generate images' });

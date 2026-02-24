@@ -1,7 +1,7 @@
 // Video generation using Vercel AI SDK + AI Gateway
 // Primary: xai/grok-imagine-video | Fallback: alibaba/wan-v2.6-r2v
+// Requires AI_GATEWAY_API_KEY in Vercel environment variables
 import { experimental_generateVideo as generateVideo } from 'ai';
-import { gateway } from '@ai-sdk/gateway';
 
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,22 +20,18 @@ export default async function handler(req, res) {
 
         let result = null;
         let usedModel = '';
+        let lastError = '';
 
-        // Try primary model: xai/grok-imagine-video
+        // Try primary: xai/grok-imagine-video (plain string — AI SDK auto-routes via AI Gateway)
         try {
             console.log('Trying xai/grok-imagine-video...');
             result = await generateVideo({
-                model: gateway('xai/grok-imagine-video'),
+                model: 'xai/grok-imagine-video',
                 prompt: fullPrompt,
-                providerOptions: {
-                    gateway: {
-                        aspectRatio,
-                        duration: String(duration),
-                    },
-                },
             });
             usedModel = 'xai/grok-imagine-video';
         } catch (err) {
+            lastError = err.message;
             console.warn('Primary model failed:', err.message);
         }
 
@@ -44,29 +40,23 @@ export default async function handler(req, res) {
             try {
                 console.log('Trying alibaba/wan-v2.6-r2v...');
                 result = await generateVideo({
-                    model: gateway('alibaba/wan-v2.6-r2v'),
+                    model: 'alibaba/wan-v2.6-r2v',
                     prompt: fullPrompt,
-                    providerOptions: {
-                        gateway: {
-                            aspectRatio,
-                            duration: String(duration),
-                        },
-                    },
                 });
                 usedModel = 'alibaba/wan-v2.6-r2v';
             } catch (err) {
+                lastError = err.message;
                 console.warn('Fallback model failed:', err.message);
             }
         }
 
         if (!result || !result.video) {
             return res.status(500).json({
-                error: 'Video generation failed on all models. Please try again later.'
+                error: `Video generation failed. ${lastError}. Make sure AI_GATEWAY_API_KEY is set in Vercel Environment Variables.`
             });
         }
 
-        // The result.video contains the video data
-        // Convert to base64 for frontend consumption
+        // Convert video result to base64
         const videoData = result.video;
         let base64Data;
 
@@ -74,17 +64,20 @@ export default async function handler(req, res) {
             base64Data = videoData.base64;
         } else if (videoData.uint8Array) {
             base64Data = Buffer.from(videoData.uint8Array).toString('base64');
-        } else if (typeof videoData === 'string') {
-            // URL-based result
+        } else if (typeof videoData === 'string' && videoData.startsWith('http')) {
+            // URL-based result — return directly
             return res.json({
                 success: true,
-                video: {
-                    data: videoData,
-                    mimeType: 'video/mp4',
-                    model: usedModel,
-                    prompt: fullPrompt,
-                }
+                video: { data: videoData, mimeType: 'video/mp4', model: usedModel, prompt: fullPrompt }
             });
+        } else {
+            // Try to convert whatever we got
+            try {
+                const buf = Buffer.from(videoData);
+                base64Data = buf.toString('base64');
+            } catch {
+                return res.status(500).json({ error: 'Could not process video data' });
+            }
         }
 
         res.json({

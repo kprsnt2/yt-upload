@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ai-sdk/gateway": "^3.0.54",
     "@google/generative-ai": "^0.24.1",
     "ai": "^6.0.98",
     "axios": "^1.13.5",

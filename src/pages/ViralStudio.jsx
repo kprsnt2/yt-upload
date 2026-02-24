@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Zap, RefreshCw, Copy, Rocket } from 'lucide-react';
+import { Sparkles, Zap, RefreshCw, Copy, Rocket, Film, Image } from 'lucide-react';
 import axios from 'axios';
 import { API } from '../config.js';
 import { compileVideoInBrowser, downloadBlob, createVideoUrl } from '../lib/videoCompiler.js';
@@ -8,17 +8,18 @@ import { compileVideoInBrowser, downloadBlob, createVideoUrl } from '../lib/vide
 export default function ViralStudioPage() {
     const navigate = useNavigate();
     const [niche, setNiche] = useState('telugu culture');
+    const [genMode, setGenMode] = useState('video'); // 'video' or 'images'
     const [ideas, setIdeas] = useState([]);
     const [selectedIdea, setSelectedIdea] = useState(null);
     const [script, setScript] = useState(null);
     const [loading, setLoading] = useState(false);
     const [loadingText, setLoadingText] = useState('');
-    const [phase, setPhase] = useState('ideas'); // ideas | script | generating
+    const [phase, setPhase] = useState('ideas');
     const [error, setError] = useState('');
     const [autoProgress, setAutoProgress] = useState(0);
-    const [autoImages, setAutoImages] = useState([]);
     const [videoBlob, setVideoBlob] = useState(null);
     const [videoUrl, setVideoUrl] = useState('');
+    const [sceneCount, setSceneCount] = useState(0);
 
     const handleGetIdeas = async () => {
         setLoading(true);
@@ -55,12 +56,65 @@ export default function ViralStudioPage() {
         }
     };
 
-    // Full auto: generate images from script then compile video in browser
-    const handleAutoGenerate = async () => {
+    // Auto generate: VIDEO mode — generate one video per scene prompt
+    const handleAutoGenerateVideo = async () => {
         if (!script || !script.scenes) return;
         setPhase('generating');
         setAutoProgress(0);
         setError('');
+        setSceneCount(script.scenes.length);
+
+        // Combine all scene prompts into one comprehensive prompt for a single video
+        const combinedPrompt = script.scenes.map((s, i) =>
+            `Scene ${i + 1}: ${s.imagePrompt || s.narration}`
+        ).join('. ');
+
+        const aspectRatio = selectedIdea?.format === 'Long' ? '16:9' : '9:16';
+
+        setAutoProgress(10);
+        setLoadingText('Generating AI video from script... 🎬 This may take 1-2 minutes');
+
+        try {
+            const res = await axios.post(`${API}/generate-video`, {
+                prompt: `${script.overallTitle}. ${combinedPrompt}`,
+                aspectRatio,
+                duration: selectedIdea?.format === 'Long' ? 10 : 5,
+                style: 'cinematic'
+            }, { timeout: 180000 });
+
+            setAutoProgress(80);
+
+            const videoData = res.data.video;
+            if (videoData.data.startsWith('data:')) {
+                const response = await fetch(videoData.data);
+                const blob = await response.blob();
+                setVideoBlob(blob);
+                setVideoUrl(URL.createObjectURL(blob));
+            } else {
+                setVideoUrl(videoData.data);
+                try {
+                    const response = await fetch(videoData.data);
+                    const blob = await response.blob();
+                    setVideoBlob(blob);
+                } catch {
+                    // URL only fallback
+                }
+            }
+        } catch (err) {
+            setError(err.response?.data?.error || 'Video generation failed. Try image mode.');
+        }
+
+        setAutoProgress(100);
+        setLoadingText('Done! 🎉');
+    };
+
+    // Auto generate: IMAGES mode — generate images then compile
+    const handleAutoGenerateImages = async () => {
+        if (!script || !script.scenes) return;
+        setPhase('generating');
+        setAutoProgress(0);
+        setError('');
+        setSceneCount(0);
 
         const allImages = [];
         for (let i = 0; i < script.scenes.length; i++) {
@@ -71,21 +125,17 @@ export default function ViralStudioPage() {
             try {
                 const res = await axios.post(`${API}/generate-images`, {
                     prompt: scene.imagePrompt || scene.narration,
-                    count: 1,
-                    style: 'cinematic',
+                    count: 1, style: 'cinematic',
                     aspectRatio: selectedIdea?.format === 'Long' ? '16:9' : '9:16'
                 });
-                if (res.data.images?.length > 0) {
-                    allImages.push(...res.data.images);
-                }
+                if (res.data.images?.length > 0) allImages.push(...res.data.images);
             } catch (err) {
                 console.warn(`Scene ${i + 1} failed:`, err.message);
             }
         }
 
-        setAutoImages(allImages);
+        setSceneCount(allImages.length);
 
-        // Compile video in browser
         if (allImages.length > 0) {
             setAutoProgress(65);
             setLoadingText('Compiling video in your browser... 🎬');
@@ -94,14 +144,13 @@ export default function ViralStudioPage() {
                 const blob = await compileVideoInBrowser(
                     allImages.map(img => img.data),
                     {
-                        format: fmt,
-                        durationPerImage: fmt === 'long' ? 5 : 4,
+                        format: fmt, durationPerImage: fmt === 'long' ? 5 : 4,
                         onProgress: (p) => setAutoProgress(65 + Math.round(p * 0.3))
                     }
                 );
                 setVideoBlob(blob);
                 setVideoUrl(createVideoUrl(blob));
-            } catch (err) {
+            } catch {
                 setError('Video compilation failed but images were generated');
             }
         }
@@ -110,10 +159,16 @@ export default function ViralStudioPage() {
         setLoadingText('Done! 🎉');
     };
 
+    const handleAutoGenerate = () => {
+        if (genMode === 'video') handleAutoGenerateVideo();
+        else handleAutoGenerateImages();
+    };
+
     const copyMetadata = () => {
         if (!script) return;
-        const text = `Title: ${script.overallTitle}\n\nTelugu: ${script.overallTitleTelugu}\n\nDescription:\n${script.description}\n\n${script.descriptionTelugu}\n\nTags: ${script.tags?.join(', ')}`;
-        navigator.clipboard.writeText(text);
+        navigator.clipboard.writeText(
+            `Title: ${script.overallTitle}\n\nTelugu: ${script.overallTitleTelugu}\n\nDescription:\n${script.description}\n\n${script.descriptionTelugu}\n\nTags: ${script.tags?.join(', ')}`
+        );
     };
 
     return (
@@ -126,8 +181,26 @@ export default function ViralStudioPage() {
                 </div>
             </div>
 
-            {/* Niche selector */}
+            {/* Mode + Niche */}
             <div className="card" style={{ marginBottom: '20px' }}>
+                {/* Mode toggle */}
+                <div className="input-group" style={{ marginBottom: '16px' }}>
+                    <label>Output Mode</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className={`btn btn-sm ${genMode === 'video' ? 'btn-primary' : 'btn-secondary'}`}
+                            onClick={() => setGenMode('video')}>
+                            <Film size={14} /> AI Video
+                        </button>
+                        <button className={`btn btn-sm ${genMode === 'images' ? 'btn-primary' : 'btn-secondary'}`}
+                            onClick={() => setGenMode('images')}>
+                            <Image size={14} /> AI Images
+                        </button>
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        {genMode === 'video' ? '⚡ Direct AI video from script (Grok Imagine)' : '🖼️ Generate images → compile slideshow'}
+                    </div>
+                </div>
+
                 <div className="input-group" style={{ marginBottom: '16px' }}>
                     <label>Content Niche</label>
                     <div className="tag-list">
@@ -136,6 +209,7 @@ export default function ViralStudioPage() {
                         ))}
                     </div>
                 </div>
+
                 <button className="btn btn-primary btn-full" onClick={handleGetIdeas} disabled={loading}>
                     <Zap size={16} /> Get Viral Ideas
                 </button>
@@ -223,20 +297,22 @@ export default function ViralStudioPage() {
                     )}
 
                     <div style={{ marginTop: '24px', display: 'flex', gap: '12px' }}>
-                        <button className="btn btn-secondary" onClick={() => setPhase('ideas')}>← Back to Ideas</button>
-                        <button className="btn btn-primary btn-full" onClick={handleAutoGenerate}><Rocket size={16} /> Auto Generate Everything</button>
+                        <button className="btn btn-secondary" onClick={() => setPhase('ideas')}>← Back</button>
+                        <button className="btn btn-primary btn-full" onClick={handleAutoGenerate}>
+                            <Rocket size={16} /> {genMode === 'video' ? 'Generate AI Video' : 'Generate Images + Compile'}
+                        </button>
                     </div>
                 </div>
             )}
 
-            {/* Auto generation progress */}
+            {/* Generation progress */}
             {phase === 'generating' && (
                 <div>
                     <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
                         {autoProgress < 100 ? (
                             <>
                                 <div className="loading-spinner" style={{ margin: '0 auto 16px' }} />
-                                <h3>Auto Generating...</h3>
+                                <h3>{genMode === 'video' ? 'Generating AI Video...' : 'Auto Generating...'}</h3>
                                 <p className="loading-text loading-pulse" style={{ marginTop: '8px' }}>{loadingText}</p>
                                 <div className="progress-bar" style={{ marginTop: '20px' }}>
                                     <div className="progress-fill" style={{ width: `${autoProgress}%` }} />
@@ -247,7 +323,9 @@ export default function ViralStudioPage() {
                             <>
                                 <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🎉</div>
                                 <h2>Video Ready!</h2>
-                                <p style={{ color: 'var(--text-secondary)', margin: '8px 0 24px' }}>{autoImages.length} scenes generated and compiled</p>
+                                <p style={{ color: 'var(--text-secondary)', margin: '8px 0 24px' }}>
+                                    {genMode === 'video' ? 'AI video generated from script' : `${sceneCount} scenes compiled`}
+                                </p>
                                 {videoUrl && (
                                     <div style={{ marginBottom: '16px' }}>
                                         <video controls src={videoUrl} style={{ width: '100%', maxHeight: '300px', borderRadius: 'var(--radius-sm)' }} />
@@ -255,11 +333,16 @@ export default function ViralStudioPage() {
                                 )}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '300px', margin: '0 auto' }}>
                                     {videoBlob && (
-                                        <button onClick={() => downloadBlob(videoBlob, 'viral_video.webm')} className="btn btn-primary btn-lg btn-full">
+                                        <button onClick={() => downloadBlob(videoBlob, `viral_${genMode === 'video' ? 'video.mp4' : 'video.webm'}`)} className="btn btn-primary btn-lg btn-full">
                                             ⬇️ Download Video
                                         </button>
                                     )}
-                                    <button className="btn btn-secondary" onClick={() => { setPhase('ideas'); setAutoProgress(0); }}>Create Another</button>
+                                    {videoUrl && !videoBlob && (
+                                        <a href={videoUrl} download="viral_video.mp4" className="btn btn-primary btn-lg btn-full">⬇️ Download Video</a>
+                                    )}
+                                    <button className="btn btn-secondary" onClick={() => { setPhase('ideas'); setAutoProgress(0); setVideoUrl(''); setVideoBlob(null); }}>
+                                        Create Another
+                                    </button>
                                 </div>
                             </>
                         )}

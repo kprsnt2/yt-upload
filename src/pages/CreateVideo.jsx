@@ -1,20 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import {
     ArrowLeft, ArrowRight, Wand2, RefreshCw, Music, Download, Upload,
-    Check, Film, Search, X, Play
+    Check, Film, Search, X, Play, Video, Image
 } from 'lucide-react';
 import axios from 'axios';
 import { API } from '../config.js';
 import { compileVideoInBrowser, downloadBlob, createVideoUrl } from '../lib/videoCompiler.js';
-
-const STEPS = [
-    { id: 1, label: 'Prompt', icon: '✍️' },
-    { id: 2, label: 'Style', icon: '🎨' },
-    { id: 3, label: 'Images', icon: '🖼️' },
-    { id: 4, label: 'Music', icon: '🎵' },
-    { id: 5, label: 'Preview', icon: '🎬' },
-    { id: 6, label: 'Publish', icon: '🚀' },
-];
 
 const STYLES = [
     { id: 'vibrant', name: 'Vibrant', icon: '🌈' },
@@ -29,8 +20,9 @@ const STYLES = [
 export default function CreateVideoPage() {
     const [step, setStep] = useState(1);
     const [prompt, setPrompt] = useState('');
-    const [style, setStyle] = useState('vibrant');
+    const [style, setStyle] = useState('cinematic');
     const [format, setFormat] = useState('short');
+    const [genMode, setGenMode] = useState('video'); // 'video' or 'images'
     const [imageCount, setImageCount] = useState(6);
     const [images, setImages] = useState([]);
     const [selectedImages, setSelectedImages] = useState([]);
@@ -38,14 +30,83 @@ export default function CreateVideoPage() {
     const [loadingText, setLoadingText] = useState('');
     const [progress, setProgress] = useState(0);
     const [selectedMusic, setSelectedMusic] = useState(null);
-    const [customAudioUrl, setCustomAudioUrl] = useState(null);
     const [videoBlob, setVideoBlob] = useState(null);
     const [videoUrl, setVideoUrl] = useState('');
     const [metadata, setMetadata] = useState(null);
     const [metadataLang, setMetadataLang] = useState('en');
     const [error, setError] = useState('');
 
-    // Generate images via Vercel API route
+    // Dynamic steps based on mode
+    const STEPS = genMode === 'video' ? [
+        { id: 1, label: 'Prompt', icon: '✍️' },
+        { id: 2, label: 'Generate', icon: '🎬' },
+        { id: 3, label: 'Preview', icon: '👁️' },
+        { id: 4, label: 'Publish', icon: '🚀' },
+    ] : [
+        { id: 1, label: 'Prompt', icon: '✍️' },
+        { id: 2, label: 'Style', icon: '🎨' },
+        { id: 3, label: 'Images', icon: '🖼️' },
+        { id: 4, label: 'Music', icon: '🎵' },
+        { id: 5, label: 'Preview', icon: '🎬' },
+        { id: 6, label: 'Publish', icon: '🚀' },
+    ];
+
+    // Generate VIDEO via API
+    const handleGenerateVideo = async () => {
+        if (!prompt.trim()) return;
+        setLoading(true);
+        setLoadingText('AI is generating your video... This may take 1-2 minutes 🎬');
+        setProgress(10);
+        setError('');
+        try {
+            const res = await axios.post(`${API}/generate-video`, {
+                prompt, style,
+                aspectRatio: format === 'short' ? '9:16' : '16:9',
+                duration: format === 'short' ? 5 : 10,
+            }, { timeout: 180000 }); // 3 min timeout
+
+            const videoData = res.data.video;
+            setProgress(80);
+
+            // Convert to blob for download
+            if (videoData.data.startsWith('data:')) {
+                const response = await fetch(videoData.data);
+                const blob = await response.blob();
+                setVideoBlob(blob);
+                setVideoUrl(URL.createObjectURL(blob));
+            } else {
+                // URL based
+                setVideoUrl(videoData.data);
+                const response = await fetch(videoData.data);
+                const blob = await response.blob();
+                setVideoBlob(blob);
+            }
+
+            // Generate metadata
+            setLoadingText('Generating title & tags... 📝');
+            setProgress(90);
+            try {
+                const metaRes = await axios.post(`${API}/generate-metadata`, { topic: prompt, format });
+                setMetadata(metaRes.data.metadata);
+            } catch {
+                setMetadata({
+                    title_en: `${prompt.substring(0, 60)} ✨`, title_te: prompt.substring(0, 60),
+                    description_en: `${prompt}\n\n🙏 Subscribe!\n#telugu #viral`,
+                    description_te: `${prompt}\n\n🙏 సుజాతా నానమ్మ వ్లాగ్స్`,
+                    tags: ['telugu', 'viral', 'trending', 'shorts'], category: 'Entertainment',
+                });
+            }
+
+            setProgress(100);
+            setStep(3); // Go to Preview
+        } catch (err) {
+            setError(err.response?.data?.error || 'Video generation failed. Try again or switch to Image mode.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Generate IMAGES via API
     const handleGenerateImages = async () => {
         if (!prompt.trim()) return;
         setLoading(true);
@@ -58,30 +119,26 @@ export default function CreateVideoPage() {
             });
             setImages(res.data.images);
             setSelectedImages(res.data.images.map(img => img.id));
-            setStep(3);
+            setStep(3); // Go to Images step
         } catch (err) {
-            setError(err.response?.data?.error || 'Failed to generate images. Check your API key.');
+            setError(err.response?.data?.error || 'Failed to generate images.');
         } finally {
             setLoading(false);
         }
     };
 
     const toggleImage = (id) => {
-        setSelectedImages(prev =>
-            prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-        );
+        setSelectedImages(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };
 
-    // Handle custom audio upload (creates a local blob URL)
     const handleAudioUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
         const url = URL.createObjectURL(file);
-        setCustomAudioUrl(url);
         setSelectedMusic({ id: 'custom', title: file.name, url, isCustom: true });
     };
 
-    // Compile video in the BROWSER (no server needed)
+    // Compile images → video in browser
     const handleCompileVideo = async () => {
         setLoading(true);
         setProgress(0);
@@ -89,11 +146,8 @@ export default function CreateVideoPage() {
         setError('');
         try {
             const selectedImgs = images.filter(img => selectedImages.includes(img.id));
-            const imageDataUrls = selectedImgs.map(img => img.data);
-
-            const blob = await compileVideoInBrowser(imageDataUrls, {
-                format,
-                durationPerImage: format === 'short' ? 4 : 5,
+            const blob = await compileVideoInBrowser(selectedImgs.map(img => img.data), {
+                format, durationPerImage: format === 'short' ? 4 : 5,
                 audioUrl: selectedMusic?.url || null,
                 onProgress: (p) => {
                     setProgress(p);
@@ -102,29 +156,21 @@ export default function CreateVideoPage() {
                     else setLoadingText('Finalizing... ✨');
                 }
             });
-
             setVideoBlob(blob);
             setVideoUrl(createVideoUrl(blob));
 
-            // Generate metadata
-            setLoadingText('Generating title & tags in EN + Telugu... 📝');
+            setLoadingText('Generating title & tags... 📝');
             try {
-                const metaRes = await axios.post(`${API}/generate-metadata`, {
-                    topic: prompt, format
-                });
+                const metaRes = await axios.post(`${API}/generate-metadata`, { topic: prompt, format });
                 setMetadata(metaRes.data.metadata);
             } catch {
-                // Metadata gen failed, use defaults
                 setMetadata({
-                    title_en: `${prompt.substring(0, 60)} ✨ #shorts`,
-                    title_te: prompt.substring(0, 60),
-                    description_en: `${prompt}\n\n🙏 Subscribe to Sujatha Nanamma Vlogs!\n#telugu #viral`,
+                    title_en: `${prompt.substring(0, 60)} ✨`, title_te: prompt.substring(0, 60),
+                    description_en: `${prompt}\n\n🙏 Subscribe!\n#telugu #viral`,
                     description_te: `${prompt}\n\n🙏 సుజాతా నానమ్మ వ్లాగ్స్`,
-                    tags: ['telugu', 'viral', 'trending', 'shorts'],
-                    category: 'Entertainment',
+                    tags: ['telugu', 'viral', 'trending', 'shorts'], category: 'Entertainment',
                 });
             }
-
             setStep(5);
         } catch (err) {
             setError(err.message || 'Failed to compile video');
@@ -136,17 +182,29 @@ export default function CreateVideoPage() {
     const handleDownload = () => {
         if (videoBlob) {
             const title = metadata?.title_en?.replace(/[^a-zA-Z0-9 ]/g, '').substring(0, 40) || 'video';
-            downloadBlob(videoBlob, `${title.replace(/\s+/g, '_')}.webm`);
+            const ext = genMode === 'video' ? 'mp4' : 'webm';
+            downloadBlob(videoBlob, `${title.replace(/\s+/g, '_')}.${ext}`);
         }
     };
 
     const goNext = () => {
-        if (step === 2) { handleGenerateImages(); return; }
-        if (step === 4) { handleCompileVideo(); return; }
-        setStep(s => Math.min(s + 1, 6));
+        if (genMode === 'video') {
+            if (step === 1) { setStep(2); return; }
+            if (step === 2) { handleGenerateVideo(); return; }
+            setStep(s => Math.min(s + 1, 4));
+        } else {
+            if (step === 2) { handleGenerateImages(); return; }
+            if (step === 4) { handleCompileVideo(); return; }
+            setStep(s => Math.min(s + 1, 6));
+        }
     };
 
     const goBack = () => setStep(s => Math.max(s - 1, 1));
+
+    // Determine which "preview" and "publish" steps are
+    const previewStep = genMode === 'video' ? 3 : 5;
+    const publishStep = genMode === 'video' ? 4 : 6;
+    const maxStep = genMode === 'video' ? 4 : 6;
 
     return (
         <div className="page fade-in">
@@ -155,12 +213,10 @@ export default function CreateVideoPage() {
             {/* Steps */}
             <div className="steps">
                 {STEPS.map((s) => (
-                    <div
-                        key={s.id}
+                    <div key={s.id}
                         className={`step ${step === s.id ? 'active' : ''} ${step > s.id ? 'completed' : ''}`}
                         onClick={() => step > s.id && setStep(s.id)}
-                        style={{ cursor: step > s.id ? 'pointer' : 'default' }}
-                    >
+                        style={{ cursor: step > s.id ? 'pointer' : 'default' }}>
                         <span className="step-number">{step > s.id ? '✓' : s.icon}</span>
                         {s.label}
                     </div>
@@ -186,12 +242,8 @@ export default function CreateVideoPage() {
                     <p className="loading-text loading-pulse">{loadingText}</p>
                     {progress > 0 && (
                         <div style={{ width: '100%', maxWidth: '300px' }}>
-                            <div className="progress-bar">
-                                <div className="progress-fill" style={{ width: `${progress}%` }} />
-                            </div>
-                            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '6px', textAlign: 'center' }}>
-                                {progress}%
-                            </p>
+                            <div className="progress-bar"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '6px', textAlign: 'center' }}>{progress}%</p>
                         </div>
                     )}
                 </div>
@@ -200,44 +252,93 @@ export default function CreateVideoPage() {
             {/* Step Content */}
             {!loading && (
                 <div className="slide-up">
-                    {/* STEP 1: PROMPT */}
+                    {/* STEP 1: PROMPT + MODE SELECT */}
                     {step === 1 && (
                         <div>
+                            {/* Mode toggle: Video vs Images */}
+                            <div className="input-group" style={{ marginBottom: '20px' }}>
+                                <label>Generation Mode</label>
+                                <div className="format-selector">
+                                    <div className={`format-option ${genMode === 'video' ? 'selected' : ''}`} onClick={() => { setGenMode('video'); setStep(1); }}>
+                                        <div style={{ fontSize: '2rem' }}>🎬</div>
+                                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>AI Video</div>
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Direct from prompt</div>
+                                        <div className="badge badge-accent" style={{ marginTop: '4px', fontSize: '0.65rem' }}>Recommended</div>
+                                    </div>
+                                    <div className={`format-option ${genMode === 'images' ? 'selected' : ''}`} onClick={() => { setGenMode('images'); setStep(1); }}>
+                                        <div style={{ fontSize: '2rem' }}>🖼️</div>
+                                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>AI Images</div>
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Slideshow + music</div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div className="input-group" style={{ marginBottom: '20px' }}>
                                 <label>What's your video about?</label>
-                                <textarea
-                                    className="textarea"
+                                <textarea className="textarea"
                                     placeholder="e.g., Beautiful Telugu village sunrise with farmers working in green paddy fields, birds flying across colorful sky..."
-                                    value={prompt}
-                                    onChange={(e) => setPrompt(e.target.value)}
-                                    rows={4}
-                                />
+                                    value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} />
                             </div>
+
                             <div className="format-selector" style={{ marginBottom: '20px' }}>
                                 <div className={`format-option ${format === 'short' ? 'selected' : ''}`} onClick={() => setFormat('short')}>
                                     <div className="format-preview short" />
                                     <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Short</div>
-                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>9:16 • Under 60s</div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>9:16 • {genMode === 'video' ? '5-10s clip' : 'Under 60s'}</div>
                                 </div>
                                 <div className={`format-option ${format === 'long' ? 'selected' : ''}`} onClick={() => setFormat('long')}>
                                     <div className="format-preview long" />
                                     <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Long Video</div>
-                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>16:9 • 2-3 min</div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>16:9 • {genMode === 'video' ? '10-15s clip' : '2-3 min'}</div>
                                 </div>
                             </div>
+
+                            {genMode === 'images' && (
+                                <div className="input-group" style={{ marginBottom: '20px' }}>
+                                    <label>Number of images/scenes</label>
+                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                        {[4, 6, 8, 10, 12].map(n => (
+                                            <button key={n} className={`btn btn-sm ${imageCount === n ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setImageCount(n)}>{n}</button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* STEP 2 for VIDEO mode: Style + Generate */}
+                    {step === 2 && genMode === 'video' && (
+                        <div>
                             <div className="input-group" style={{ marginBottom: '20px' }}>
-                                <label>Number of images/scenes</label>
-                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                    {[4, 6, 8, 10, 12, 15].map(n => (
-                                        <button key={n} className={`btn btn-sm ${imageCount === n ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setImageCount(n)}>{n}</button>
+                                <label>Video Style</label>
+                                <div className="style-grid">
+                                    {STYLES.map(s => (
+                                        <div key={s.id} className={`style-option ${style === s.id ? 'selected' : ''}`} onClick={() => setStyle(s.id)}>
+                                            <div className="style-option-icon">{s.icon}</div>
+                                            <div>{s.name}</div>
+                                        </div>
                                     ))}
                                 </div>
+                            </div>
+                            <div className="card" style={{ marginTop: '16px', marginBottom: '16px' }}>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '8px' }}>Summary</div>
+                                <p style={{ fontSize: '0.85rem', lineHeight: '1.5' }}>
+                                    "{prompt.substring(0, 80)}..." — <span style={{ color: 'var(--accent)' }}>{STYLES.find(s => s.id === style)?.name}</span>
+                                    {' • '}{format === 'short' ? '9:16 Short' : '16:9 Long'}
+                                    {' • '}🎬 AI Video
+                                </p>
+                            </div>
+                            <div className="card" style={{ background: 'var(--gradient-card)', padding: '16px' }}>
+                                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                                    ⚡ <strong>AI Video Mode:</strong> Generates a full video clip from your prompt using Grok Imagine Video.
+                                    No images needed — just text to video! Takes 1-2 minutes.
+                                </p>
                             </div>
                         </div>
                     )}
 
-                    {/* STEP 2: STYLE */}
-                    {step === 2 && (
+                    {/* STEP 2 for IMAGES mode: Style */}
+                    {step === 2 && genMode === 'images' && (
                         <div>
                             <div className="input-group" style={{ marginBottom: '20px' }}>
                                 <label>Choose Art Style</label>
@@ -260,102 +361,69 @@ export default function CreateVideoPage() {
                         </div>
                     )}
 
-                    {/* STEP 3: IMAGES */}
-                    {step === 3 && (
+                    {/* STEP 3 for IMAGES mode: Generated Images */}
+                    {step === 3 && genMode === 'images' && (
                         <div>
                             <div className="section-header">
                                 <span className="section-title">Generated ({selectedImages.length}/{images.length} selected)</span>
-                                <button className="btn btn-ghost btn-sm" onClick={handleGenerateImages}>
-                                    <RefreshCw size={14} /> Redo
-                                </button>
+                                <button className="btn btn-ghost btn-sm" onClick={handleGenerateImages}><RefreshCw size={14} /> Redo</button>
                             </div>
-                            <div className={`image-grid`}>
+                            <div className="image-grid">
                                 {images.map(img => (
-                                    <div
-                                        key={img.id}
+                                    <div key={img.id}
                                         className={`image-card ${format === 'long' ? 'landscape' : ''} ${selectedImages.includes(img.id) ? 'selected' : ''}`}
-                                        onClick={() => toggleImage(img.id)}
-                                    >
+                                        onClick={() => toggleImage(img.id)}>
                                         <img src={img.data} alt="Generated" loading="lazy" />
-                                        <div className="image-card-overlay">
-                                            {selectedImages.includes(img.id) && <Check size={20} color="#10b981" />}
-                                        </div>
+                                        <div className="image-card-overlay">{selectedImages.includes(img.id) && <Check size={20} color="#10b981" />}</div>
                                     </div>
                                 ))}
                             </div>
                             {images.length === 0 && (
                                 <div className="empty-state">
-                                    <div className="empty-state-icon">🖼️</div>
-                                    <p>No images generated yet</p>
+                                    <div className="empty-state-icon">🖼️</div><p>No images generated yet</p>
                                     <button className="btn btn-primary" onClick={handleGenerateImages}><Wand2 size={16} /> Generate Now</button>
                                 </div>
                             )}
                         </div>
                     )}
 
-                    {/* STEP 4: MUSIC */}
-                    {step === 4 && (
+                    {/* STEP 4 for IMAGES mode: Music */}
+                    {step === 4 && genMode === 'images' && (
                         <div>
-                            <div className="section-header">
-                                <span className="section-title">Add Background Music</span>
-                            </div>
-
-                            {/* Upload custom audio */}
+                            <div className="section-header"><span className="section-title">Add Background Music</span></div>
                             <div className="card" style={{ marginBottom: '16px', padding: '16px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                     <Upload size={20} color="var(--accent)" />
                                     <div style={{ flex: 1 }}>
                                         <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Upload Your Track</div>
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>MP3, WAV, OGG — your own soundtrack or downloaded remix</div>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>MP3, WAV, OGG</div>
                                     </div>
                                     <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
-                                        Browse
-                                        <input type="file" accept="audio/*" onChange={handleAudioUpload} style={{ display: 'none' }} />
+                                        Browse<input type="file" accept="audio/*" onChange={handleAudioUpload} style={{ display: 'none' }} />
                                     </label>
                                 </div>
-                                {selectedMusic?.isCustom && (
-                                    <div style={{ marginTop: '8px', fontSize: '0.8rem', color: 'var(--success)' }}>
-                                        ✅ {selectedMusic.title}
-                                    </div>
-                                )}
+                                {selectedMusic?.isCustom && <div style={{ marginTop: '8px', fontSize: '0.8rem', color: 'var(--success)' }}>✅ {selectedMusic.title}</div>}
                             </div>
-
-                            {/* Skip music */}
-                            <button
-                                className={`btn btn-full ${!selectedMusic ? 'btn-primary' : 'btn-secondary'}`}
-                                onClick={() => { setSelectedMusic(null); setCustomAudioUrl(null); }}
-                                style={{ marginBottom: '16px' }}
-                            >
-                                {!selectedMusic ? '✅ No Music (Selected)' : 'Skip Music (No Audio)'}
+                            <button className={`btn btn-full ${!selectedMusic ? 'btn-primary' : 'btn-secondary'}`}
+                                onClick={() => setSelectedMusic(null)} style={{ marginBottom: '16px' }}>
+                                {!selectedMusic ? '✅ No Music (Selected)' : 'Skip Music'}
                             </button>
-
-                            <div className="card" style={{ padding: '16px', background: 'var(--gradient-card)' }}>
-                                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                                    💡 <strong>Tip:</strong> Download a Telugu folk song or remix from YouTube/SoundCloud, then upload it here.
-                                    The video will be compiled with your chosen track right in your browser!
-                                </p>
-                            </div>
                         </div>
                     )}
 
-                    {/* STEP 5: PREVIEW & METADATA */}
-                    {step === 5 && (
+                    {/* PREVIEW STEP (step 3 for video, step 5 for images) */}
+                    {step === previewStep && (
                         <div>
                             {videoUrl && (
                                 <div className="video-preview" style={{ marginBottom: '24px' }}>
-                                    <video controls src={videoUrl} style={{ width: '100%', maxHeight: '400px' }} />
+                                    <video controls src={videoUrl} style={{ width: '100%', maxHeight: '400px', borderRadius: 'var(--radius-sm)' }} />
                                 </div>
                             )}
-
                             {metadata && (
                                 <div className="metadata-section">
                                     <div className="metadata-lang-tabs">
-                                        <button className={`metadata-lang-tab ${metadataLang === 'en' ? 'active' : ''}`} onClick={() => setMetadataLang('en')}>
-                                            🇬🇧 English
-                                        </button>
-                                        <button className={`metadata-lang-tab ${metadataLang === 'te' ? 'active' : ''}`} onClick={() => setMetadataLang('te')}>
-                                            🇮🇳 తెలుగు
-                                        </button>
+                                        <button className={`metadata-lang-tab ${metadataLang === 'en' ? 'active' : ''}`} onClick={() => setMetadataLang('en')}>🇬🇧 English</button>
+                                        <button className={`metadata-lang-tab ${metadataLang === 'te' ? 'active' : ''}`} onClick={() => setMetadataLang('te')}>🇮🇳 తెలుగు</button>
                                     </div>
                                     <div className="input-group">
                                         <label>Title</label>
@@ -364,13 +432,12 @@ export default function CreateVideoPage() {
                                     </div>
                                     <div className="input-group">
                                         <label>Description</label>
-                                        <textarea className="textarea" rows={6}
+                                        <textarea className="textarea" rows={5}
                                             value={metadataLang === 'en' ? (metadata.description_en || '') : (metadata.description_te || '')}
                                             onChange={(e) => setMetadata(prev => ({ ...prev, [metadataLang === 'en' ? 'description_en' : 'description_te']: e.target.value }))} />
                                     </div>
                                     {metadata.tags && (
-                                        <div className="input-group">
-                                            <label>Tags</label>
+                                        <div className="input-group"><label>Tags</label>
                                             <div className="tag-list">{metadata.tags.map((tag, i) => <span key={i} className="tag selected">{tag}</span>)}</div>
                                         </div>
                                     )}
@@ -379,22 +446,16 @@ export default function CreateVideoPage() {
                         </div>
                     )}
 
-                    {/* STEP 6: PUBLISH */}
-                    {step === 6 && (
+                    {/* PUBLISH STEP */}
+                    {step === publishStep && (
                         <div>
                             <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
                                 <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🎉</div>
                                 <h2>Your Video is Ready!</h2>
-                                <p style={{ color: 'var(--text-secondary)', marginTop: '8px', marginBottom: '24px' }}>
-                                    Download and upload to YouTube
-                                </p>
+                                <p style={{ color: 'var(--text-secondary)', marginTop: '8px', marginBottom: '24px' }}>Download and upload to YouTube</p>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '300px', margin: '0 auto' }}>
-                                    <button onClick={handleDownload} className="btn btn-primary btn-lg btn-full">
-                                        <Download size={18} /> Download Video
-                                    </button>
-                                    <button className="btn btn-secondary btn-lg btn-full" disabled>
-                                        <Upload size={18} /> YouTube Upload (Coming Soon)
-                                    </button>
+                                    <button onClick={handleDownload} className="btn btn-primary btn-lg btn-full"><Download size={18} /> Download Video</button>
+                                    <button className="btn btn-secondary btn-lg btn-full" disabled><Upload size={18} /> YouTube Upload (Coming Soon)</button>
                                 </div>
                             </div>
                             {metadata && (
@@ -403,13 +464,10 @@ export default function CreateVideoPage() {
                                     <div style={{ fontSize: '0.85rem', lineHeight: '1.8' }}>
                                         <strong>Title:</strong> {metadata.title_en}<br />
                                         <strong>Telugu:</strong> {metadata.title_te}<br />
-                                        <strong>Category:</strong> {metadata.category}<br />
                                         <strong>Tags:</strong> {metadata.tags?.join(', ')}
                                     </div>
                                     <button className="btn btn-secondary btn-sm" style={{ marginTop: '12px' }}
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(`${metadata.title_en}\n\n${metadata.description_en}\n\nTags: ${metadata.tags?.join(', ')}`);
-                                        }}>
+                                        onClick={() => navigator.clipboard.writeText(`${metadata.title_en}\n\n${metadata.description_en}\n\nTags: ${metadata.tags?.join(', ')}`)}>
                                         📋 Copy All
                                     </button>
                                 </div>
@@ -419,15 +477,14 @@ export default function CreateVideoPage() {
 
                     {/* Navigation */}
                     <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'space-between' }}>
-                        {step > 1 && (
-                            <button className="btn btn-secondary" onClick={goBack}><ArrowLeft size={16} /> Back</button>
-                        )}
+                        {step > 1 && <button className="btn btn-secondary" onClick={goBack}><ArrowLeft size={16} /> Back</button>}
                         <div style={{ flex: 1 }} />
-                        {step < 6 && (
+                        {step < maxStep && (
                             <button className="btn btn-primary" onClick={goNext} disabled={step === 1 && !prompt.trim()}>
-                                {step === 2 ? <><Wand2 size={16} /> Generate Images</> :
-                                    step === 4 ? <><Film size={16} /> Compile Video</> :
-                                        <>Next <ArrowRight size={16} /></>}
+                                {genMode === 'video' && step === 2 ? <><Wand2 size={16} /> Generate Video</> :
+                                    genMode === 'images' && step === 2 ? <><Wand2 size={16} /> Generate Images</> :
+                                        genMode === 'images' && step === 4 ? <><Film size={16} /> Compile Video</> :
+                                            <>Next <ArrowRight size={16} /></>}
                             </button>
                         )}
                     </div>

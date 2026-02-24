@@ -50,8 +50,8 @@ export default async function handler(req, res) {
                         sampler: 'K_DPM_2_ANCESTRAL',
                         seed: seed,
                         steps: 25,
-                        width: aspectRatio === '16:9' ? 1344 : 768,
-                        height: aspectRatio === '16:9' ? 768 : 1344,
+                        width: aspectRatio === '16:9' ? 1344 : 1024,
+                        height: aspectRatio === '16:9' ? 768 : 1024,
                     }),
                     signal: AbortSignal.timeout(30000),
                 });

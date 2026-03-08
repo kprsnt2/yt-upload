@@ -1,5 +1,5 @@
 // Video generation using Vercel AI SDK + AI Gateway
-// Primary: xai/grok-imagine-video | Fallback: alibaba/wan-v2.6-r2v
+// Primary: alibaba/wan-v2.6-t2v | Fallback: alibaba/wan-v2.6-i2v-flash
 // Requires AI_GATEWAY_API_KEY in Vercel environment variables
 import { experimental_generateVideo as generateVideo } from 'ai';
 
@@ -22,28 +22,28 @@ export default async function handler(req, res) {
         let usedModel = '';
         let lastError = '';
 
-        // Try primary: xai/grok-imagine-video (plain string — AI SDK auto-routes via AI Gateway)
+        // Try primary: alibaba/wan-v2.6-t2v (text-to-video)
         try {
-            console.log('Trying xai/grok-imagine-video...');
+            console.log('Trying alibaba/wan-v2.6-t2v...');
             result = await generateVideo({
-                model: 'xai/grok-imagine-video',
+                model: 'alibaba/wan-v2.6-t2v',
                 prompt: fullPrompt,
             });
-            usedModel = 'xai/grok-imagine-video';
+            usedModel = 'alibaba/wan-v2.6-t2v';
         } catch (err) {
             lastError = err.message;
             console.warn('Primary model failed:', err.message);
         }
 
-        // Fallback: alibaba/wan-v2.6-r2v
+        // Fallback: alibaba/wan-v2.6-i2v-flash
         if (!result) {
             try {
-                console.log('Trying alibaba/wan-v2.6-r2v...');
+                console.log('Trying alibaba/wan-v2.6-i2v-flash...');
                 result = await generateVideo({
-                    model: 'alibaba/wan-v2.6-r2v',
+                    model: 'alibaba/wan-v2.6-i2v-flash',
                     prompt: fullPrompt,
                 });
-                usedModel = 'alibaba/wan-v2.6-r2v';
+                usedModel = 'alibaba/wan-v2.6-i2v-flash';
             } catch (err) {
                 lastError = err.message;
                 console.warn('Fallback model failed:', err.message);

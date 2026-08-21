@@ -1,16 +1,70 @@
-# React + Vite
+# SujathaVlogs Studio 🎬
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+AI-Powered YouTube Video Generation Studio with Google Vertex AI Veo, Gemini AI, and Multi-language (English + Telugu) SEO metadata.
 
-Currently, two official plugins are available:
+## ✨ Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Google Vertex AI Veo Video Generation**: Direct text-to-video generation using Google's state-of-the-art Veo models (`veo-2.0-generate-001`, `veo-3.1-generate-preview`).
+- **Viral AI Studio**: Automated trending topic discovery, AI scriptwriting, and automated video compilation.
+- **AI Slideshow & Music**: Image generation, customizable style presets, audio uploading, and client-side compilation.
+- **Multilingual SEO Metadata**: Automatic title, description, and hashtag generation in English and Telugu.
 
-## React Compiler
+---
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 🚀 Getting Started
 
-## Expanding the ESLint configuration
+### 1. Install Dependencies
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+# Install frontend dependencies
+npm install
+
+# Install server dependencies
+cd server && npm install && cd ..
+```
+
+### 2. Environment Variables
+
+Create `.env` in the root directory (or in `server/.env`):
+
+```env
+# Option A: Google AI Studio API Key
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Option B: Google Cloud Vertex AI
+GOOGLE_GENAI_USE_VERTEXAI=true
+VERTEX_PROJECT_ID=your-google-cloud-project-id
+VERTEX_LOCATION=us-central1
+# GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+
+# Veo Video Model (default: veo-2.0-generate-001)
+VEO_MODEL=veo-2.0-generate-001
+
+# Optional: Royalty-free music search
+PIXABAY_API_KEY=your_pixabay_api_key_here
+```
+
+### 3. Run Development Servers
+
+**Backend API Server:**
+```bash
+cd server
+npm run dev
+```
+
+**Frontend (Vite):**
+```bash
+npm run dev
+```
+
+---
+
+## 📡 API Endpoints
+
+- `POST /api/generate-video` - Generates AI video using Vertex AI / Veo API (`prompt`, `aspectRatio`, `duration`, `style`, `model`).
+- `POST /api/generate-images` - Generates image sequence from prompt.
+- `POST /api/viral/ideas` - Generates trending content ideas.
+- `POST /api/viral/script` - Generates scene-by-scene script with visual cues and narration.
+- `POST /api/generate-metadata` - Generates YouTube titles, descriptions, and tags in EN & TE.
+- `GET /api/music/search` - Searches royalty-free audio tracks.
+- `POST /api/compile-video` - Compiles images and audio into video.

@@ -330,7 +330,7 @@ export default function CreateVideoPage() {
                             </div>
                             <div className="card" style={{ background: 'var(--gradient-card)', padding: '16px' }}>
                                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-                                    ⚡ <strong>AI Video Mode:</strong> Generates a full video clip from your prompt using Grok Imagine Video.
+                                    ⚡ <strong>AI Video Mode:</strong> Generates a full video clip from your prompt using Google Vertex AI Veo.
                                     No images needed — just text to video! Takes 1-2 minutes.
                                 </p>
                             </div>

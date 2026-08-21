@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { generateImages } from './services/imageGenerator.js';
+import { generateVeoVideo } from './services/veoGenerator.js';
 import { compileVideo } from './services/videoCompiler.js';
 import { searchMusic, getMusicCategories } from './services/musicService.js';
 import { generateViralIdeas, generateViralScript } from './services/viralEngine.js';
@@ -58,6 +59,20 @@ app.post('/api/generate-images', async (req, res) => {
   } catch (error) {
     console.error('Image generation error:', error);
     res.status(500).json({ error: error.message || 'Failed to generate images' });
+  }
+});
+
+// Generate AI video using Vertex AI / Veo API
+app.post('/api/generate-video', async (req, res) => {
+  try {
+    const { prompt, style = 'cinematic', aspectRatio = '9:16', duration = 5, model = null } = req.body;
+    if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+
+    const result = await generateVeoVideo({ prompt, style, aspectRatio, duration, model });
+    res.json(result);
+  } catch (error) {
+    console.error('Veo video generation error:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate video' });
   }
 });
 
@@ -179,6 +194,7 @@ app.listen(PORT, () => {
   console.log(`\n🎬 SujathaVlogs Studio API Server`);
   console.log(`   Running on http://localhost:${PORT}`);
   console.log(`   Gemini API: ${process.env.GEMINI_API_KEY ? '✅ Configured' : '❌ Missing'}`);
+  console.log(`   Vertex AI / Veo: ${(process.env.VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT) ? '✅ Configured (Vertex AI)' : process.env.GEMINI_API_KEY ? '✅ Configured (Gemini API)' : '❌ Missing (Set GEMINI_API_KEY or VERTEX_PROJECT_ID)'}`);
   console.log(`   Pixabay API: ${process.env.PIXABAY_API_KEY ? '✅ Configured' : '⚠️ Missing (music search won\'t work)'}`);
   console.log('');
 });

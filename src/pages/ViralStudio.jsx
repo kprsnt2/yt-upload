@@ -197,7 +197,7 @@ export default function ViralStudioPage() {
                         </button>
                     </div>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        {genMode === 'video' ? '⚡ Direct AI video from script (Grok Imagine)' : '🖼️ Generate images → compile slideshow'}
+                        {genMode === 'video' ? '⚡ Direct AI video from script (Google Veo)' : '🖼️ Generate images → compile slideshow'}
                     </div>
                 </div>
 
